@@ -1,3 +1,24 @@
+function Get-SafeFileName {
+    param(
+        [string]$Value
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Value)) {
+        return ""
+    }
+
+    $safe = $Value -replace '\s+', '_'
+    $safe = $safe -replace '[^0-9A-Za-z_\-]', '_'
+    $safe = [System.Text.RegularExpressions.Regex]::Replace($safe, '_{2,}', '_')
+    $safe = $safe.Trim('_')
+
+    if ($safe.Length -gt 80) {
+        $safe = $safe.Substring(0, 80)
+    }
+
+    return $safe
+}
+
 function Export-TableSqlWithData {
     param(
         [string]$ConnectionString,
@@ -9,7 +30,8 @@ function Export-TableSqlWithData {
         [string]$OracleDllPath = $null,
         [string]$PrimaryKeysSqlPath = $null,
         [string]$ColumnDefinitionsSqlPath = $null,
-        [string]$OutputFile = $null
+        [string]$OutputFile = $null,
+        [switch]$SplitByOperation
     )
 
     if ($OracleDllPath) {
@@ -228,6 +250,49 @@ function Export-TableSqlWithData {
         if ($outputDirectory -and -not (Test-Path -Path $outputDirectory)) {
             New-Item -ItemType Directory -Path $outputDirectory -Force | Out-Null
         }
-        $outputLines | Set-Content -Path $OutputFile -Encoding UTF8
+        if ($SplitByOperation) {
+            $baseName = [System.IO.Path]::GetFileNameWithoutExtension($OutputFile)
+            if ([string]::IsNullOrWhiteSpace($baseName)) {
+                $baseName = "query"
+            }
+
+            $conditionFragment = Get-SafeFileName -Value $ConditionSql
+            if ([string]::IsNullOrWhiteSpace($conditionFragment)) {
+                $conditionFragment = "condition"
+            }
+
+            if ($baseName -notlike "*$conditionFragment*") {
+                $groupPrefix = "$baseName`_$conditionFragment"
+            } else {
+                $groupPrefix = $baseName
+            }
+
+            foreach ($section in $sections) {
+                if (-not $section.Lines -or $section.Lines.Count -eq 0) { continue }
+
+                $sectionLabel = Get-SafeFileName -Value $section.Header.ToLower()
+                if ([string]::IsNullOrWhiteSpace($sectionLabel)) {
+                    $sectionLabel = "section"
+                }
+
+                $sectionFileName = "$groupPrefix`_$sectionLabel.sql"
+                $sectionPath = if ($outputDirectory) {
+                    Join-Path $outputDirectory $sectionFileName
+                } else {
+                    $sectionFileName
+                }
+
+                $fileHeaderLine = "-------- $($section.Header) --------"
+                $content = New-Object System.Collections.Generic.List[string]
+                $content.Add($fileHeaderLine) | Out-Null
+                foreach ($line in $section.Lines) {
+                    $content.Add($line) | Out-Null
+                }
+
+                $content | Set-Content -Path $sectionPath -Encoding UTF8
+            }
+        } else {
+            $outputLines | Set-Content -Path $OutputFile -Encoding UTF8
+        }
     }
 }
