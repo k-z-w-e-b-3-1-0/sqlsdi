@@ -1,51 +1,51 @@
 # sqlsdi
 
-PowerShell utilities for exporting Oracle table data as SQL scripts that can be replayed later. The workflow collects matching rows, generates matching `SELECT`, `DELETE`, `INSERT`, and optional flashback queries, and saves the output to a timestamped `.sql` file.
+Oracle のテーブルデータを後から再実行できる SQL スクリプトとしてエクスポートするための PowerShell ユーティリティです。ワークフローは条件に一致する行を収集し、対応する `SELECT`、`DELETE`、`INSERT`、および必要に応じてフラッシュバック用のクエリを生成し、結果をタイムスタンプ付きの `.sql` ファイルに保存します。
 
-## Repository layout
+## リポジトリ構成
 
-| File | Description |
+| ファイル | 説明 |
 | ---- | ----------- |
-| `SelectDeletInsert.ps1` | Core function `Export-TableSqlWithData` that connects to Oracle, retrieves metadata, and emits SQL statements. |
-| `run.ps1` | Example entry point that wires parameters and calls the export function. |
-| `exec.bat` | Convenience wrapper for Windows to invoke `run.ps1` from a double-click and redirect the output to `query<timestamp>.sql`. |
+| `SelectDeletInsert.ps1` | Oracle へ接続してメタデータを取得し、SQL 文を出力するコア関数 `Export-TableSqlWithData`。 |
+| `run.ps1` | パラメーターを設定してエクスポート関数を呼び出すサンプル エントリーポイント。 |
+| `exec.bat` | `run.ps1` をダブルクリックで実行し、標準出力を `query<timestamp>.sql` にリダイレクトする Windows 用ラッパー。 |
 
-## Requirements
+## 必要要件
 
-* Windows with PowerShell (the scripts assume `powershell.exe` under `C:\Windows\SysWOW64\WindowsPowerShell\v1.0`).
-* Oracle Data Provider for .NET (`Oracle.DataAccess.dll`). Update the hard-coded path inside `SelectDeletInsert.ps1` to point to the DLL on your machine before running the scripts.
-* Database connectivity that allows the supplied connection string to reach the target Oracle database.
+* PowerShell を備えた Windows 環境（スクリプトでは `C:\\Windows\\SysWOW64\\WindowsPowerShell\\v1.0` 配下の `powershell.exe` を想定）。
+* Oracle Data Provider for .NET (`Oracle.DataAccess.dll`)。アセンブリがグローバル アセンブリ キャッシュに存在しない場合は、`ORACLE_DLL_PATH` 環境変数を設定するか、`run.ps1` 実行時に `-OracleDllPath` パラメーターを指定します。
+* 指定した接続文字列で対象の Oracle データベースに接続できるネットワーク環境。
 
-## Usage
+## 使い方
 
-1. Copy the scripts to a folder on a Windows machine where the Oracle client is installed.
-2. Edit the placeholders in `run.ps1`:
-   * Replace `USERID`, `PASSWORD`, `IPADDRESS:PORT/SID`, and `SCHEMA` in the `-ConnectionString` and `-Schema` arguments.
-   * Supply a target column name (typically a status or timestamp column) and SQL condition. The values passed through `exec.bat` become the `$Column` and `$Condition` parameters consumed by `run.ps1`.
-   * Optional: adjust the flashback timestamp or remove the `-FlashbackTimestamp` argument if the database does not support flashback queries.
-   * Optional: modify `$plsql` with any pre-processing block that should execute before the data export. The script captures the `:result` output parameter and appends the message to the log section.
-3. (Optional) Change the `Oracle.DataAccess.dll` path in `SelectDeletInsert.ps1` and confirm it matches your environment.
-4. Run `exec.bat`. The batch file sets the working directory, computes a timestamp, and runs `run.ps1` through PowerShell, saving the generated SQL to `query<timestamp>.sql` in the same directory. When execution finishes, press any key to close the window.
+1. Oracle クライアントがインストールされた Windows マシン上の任意のフォルダーにスクリプト一式をコピーします。
+2. `run.ps1` 内のプレースホルダーを編集します。
+   * `-ConnectionString` と `-Schema` に渡している `USERID`、`PASSWORD`、`IPADDRESS:PORT/SID`、`SCHEMA` を実環境に合わせて置き換えます。
+   * 対象列（多くの場合はステータス列やタイムスタンプ列）と SQL 条件を設定します。`exec.bat` に指定した値が `$Column` と `$Condition` として `run.ps1` に渡されます。
+   * 任意: データベースがフラッシュバックをサポートしない場合は `-FlashbackTimestamp` を削除するか、必要なタイムスタンプに調整します。
+   * 任意: データエクスポートの前処理として実行したい PL/SQL ブロックがあれば `$plsql` 変数を変更します。スクリプトは `:result` 出力パラメーターをログに追記します。
+3. `sql/primary_keys.sql` と `sql/column_definitions.sql` のテンプレート SQL を上書きするか、パラメーターで別パスを指定することもできます（任意）。
+4. `exec.bat` を実行します。バッチ ファイルは作業ディレクトリの設定、タイムスタンプの生成、PowerShell 経由での `run.ps1` 実行を行います。生成された SQL は `output\\query_<timestamp>.sql` に書き出され、同時にコンソールにも出力されます。処理が完了したら任意のキーを押してウィンドウを閉じてください。
 
-### Running without the batch file
+### バッチ ファイルを使用しない場合
 
-You can call the PowerShell script directly:
+PowerShell から直接スクリプトを呼び出すこともできます。
 
 ```powershell
-# From a PowerShell prompt inside the repository folder
+# リポジトリ フォルダー内の PowerShell から
 . .\SelectDeletInsert.ps1
 Export-TableSqlWithData -ConnectionString "User Id=..." -Schema "SCHEMA" -TargetColumn "column_name" -ConditionSql "= 'value'" -FlashbackTimestamp "2025-08-17 19:00:00"
 ```
 
-The script emits four sections (`SELECT`, `DELETE`, `INSERT`, and optional `FLASHBACK`) followed by a log area with any warnings encountered. Redirect the output to a file if you do not use `exec.bat`:
+スクリプトは 4 つのセクション（`SELECT`、`DELETE`、`INSERT`、任意で `FLASHBACK`）を順番に出力し、最後に警告などを記録するログ領域が続きます。`exec.bat` を使用しない場合は、出力をファイルにリダイレクトしてください。
 
 ```powershell
 Export-TableSqlWithData ... | Out-File query.sql -Encoding UTF8
 ```
 
-## Notes
+## 注意事項
 
-* Ensure that every table participating in the export has a primary key. The function uses the key metadata to order rows and build deterministic output.
-* Character values are escaped with doubled single quotes, and Oracle date/timestamp values are formatted via `TO_DATE`.
-* Null values are emitted as literal `NULL` in the generated `INSERT` statements.
-* The script filters tables that contain the target column and belong to the specified schema, pulling column comments to include them as captions in the output.
+* エクスポート対象のテーブルには必ず主キーが存在する必要があります。関数は主キーのメタデータを利用して行の並びと出力を決定します。
+* 文字列はシングルクォートを二重化してエスケープし、Oracle の日付／タイムスタンプは `TO_DATE` を利用してフォーマットします。
+* `INSERT` 文では Null 値をリテラルの `NULL` として出力します。
+* 指定スキーマ内で対象列を持つテーブルのみを抽出し、列コメントを取得して出力の見出しとして付与します。
