@@ -17,8 +17,14 @@ Write-Host "Column    : $Column"
 Write-Host "Condition : $Condition"
 
 $timestamp = Get-Date -Format 'yyyyMMddHHmmss'
+$sanitizedCondition = Get-SafeFileName -Value $Condition
+if ([string]::IsNullOrWhiteSpace($sanitizedCondition)) {
+    $sanitizedCondition = "condition"
+}
+
+$baseFileName = "query_{0}_{1}" -f $timestamp, $sanitizedCondition
 $outputDirectory = Join-Path $scriptRoot 'output'
-$outputFile = Join-Path $outputDirectory "query_$timestamp.sql"
+$outputFile = Join-Path $outputDirectory ("$baseFileName.sql")
 
 if (-not $OracleDllPath -and $env:ORACLE_DLL_PATH) {
     $OracleDllPath = $env:ORACLE_DLL_PATH
@@ -32,6 +38,7 @@ $exportParams = @{
     FlashbackTimestamp   = "2025-08-17 19:00:00"
     PreSql               = $plsql
     OutputFile           = $outputFile
+    SplitByOperation     = $true
 }
 
 if ($OracleDllPath) {
@@ -40,5 +47,14 @@ if ($OracleDllPath) {
 
 Export-TableSqlWithData @exportParams
 
-Write-Host "Output file : $outputFile"
+$outputFiles = @()
+if (Test-Path -Path $outputDirectory) {
+    $filter = "$baseFileName*.sql"
+    $outputFiles = Get-ChildItem -Path $outputDirectory -Filter $filter | Select-Object -ExpandProperty FullName
+}
+
+foreach ($file in $outputFiles) {
+    Write-Host "Output file : $file"
+}
+
 Write-Host "done."
