@@ -7,7 +7,9 @@ Oracle のテーブルデータを後から再実行できる SQL スクリプ�
 | ファイル | 説明 |
 | ---- | ----------- |
 | `SelectDeletInsert.ps1` | Oracle へ接続してメタデータを取得し、SQL 文を出力するコア関数 `Export-TableSqlWithData`。 |
-| `run.ps1` | パラメーターを設定してエクスポート関数を呼び出すサンプル エントリーポイント。 |
+| `SelectDeletInsertMulti.ps1` | 複数列を対象にした条件組み立てとエクスポートを行う `Export-TableSqlWithDataMultiColumn`。 |
+| `run.ps1` | 単一列条件用のエクスポート関数を呼び出すサンプル エントリーポイント。 |
+| `run_multicolumn.ps1` | 列配列や列ごとの条件マップを受け取り、マルチカラム抽出を実行するエントリーポイント。 |
 | `exec.bat` | `run.ps1` をダブルクリックで実行し、標準出力を `query<timestamp>.sql` にリダイレクトする Windows 用ラッパー。 |
 
 ## 必要要件
@@ -19,8 +21,10 @@ Oracle のテーブルデータを後から再実行できる SQL スクリプ�
 ## 使い方
 
 1. Oracle クライアントがインストールされた Windows マシン上の任意のフォルダーにスクリプト一式をコピーします。
-2. `run.ps1` 内のプレースホルダーを編集します。
-   * `-ConnectionString` と `-Schema` に渡している `USERID`、`PASSWORD`、`IPADDRESS:PORT/SID`、`SCHEMA` を実環境に合わせて置き換えます。`-ConnectionString` パラメーターは PowerShell 実行時（Excel VBA などからの呼び出しを含む）に上書きすることもできます。
+2. `run.ps1`（単一列向け）または `run_multicolumn.ps1`（複数列向け）内のプレースホルダーを編集します。
+   * `-ConnectionString` と `-Schema` に渡している `USERID`、`PASSWORD`、`IPADDRESS:PORT/SID`、`SCHEMA` を実環境に合わせて置き換えます。
+   * 単一列の場合は対象列と SQL 条件を設定します。`exec.bat` に指定した値が `$Column` と `$Condition` として `run.ps1` に渡されます。
+   * 複数列で抽出する場合は `run_multicolumn.ps1` の `$columns` 配列、`$conditionFragments`、`$equalityConditions` のいずれか（もしくは組み合わせ）を編集します。列名をキーにした等価条件マップを用意すると、各列に `=` 条件を一括で適用できます。
    * `-OutputDirectory` パラメーターにエクスポート先のフォルダーを指定できます。未指定の場合は `run.ps1` と同じディレクトリ配下の `output` フォルダーが利用されます。
    * 対象列（多くの場合はステータス列やタイムスタンプ列）と SQL 条件を設定します。`exec.bat` に指定した値が `$Column` と `$Condition` として `run.ps1` に渡されます。
    * 任意: データベースがフラッシュバックをサポートしない場合は `-FlashbackTimestamp` を削除するか、必要なタイムスタンプに調整します。
@@ -36,6 +40,13 @@ PowerShell から直接スクリプトを呼び出すこともできます。
 # リポジトリ フォルダー内の PowerShell から
 . .\SelectDeletInsert.ps1
 Export-TableSqlWithData -ConnectionString "User Id=..." -Schema "SCHEMA" -TargetColumn "column_name" -ConditionSql "= 'value'" -FlashbackTimestamp "2025-08-17 19:00:00"
+```
+
+複数列を条件にする場合はマルチカラム用の関数を読み込みます。
+
+```powershell
+. .\SelectDeletInsertMulti.ps1
+Export-TableSqlWithDataMultiColumn -ConnectionString "User Id=..." -Schema "SCHEMA" -TargetColumns @('PK_A', 'PK_B') -ConditionFragments @("PK_A = '001'", "PK_B = 'XYZ'")
 ```
 
 スクリプトは 4 つのセクション（`SELECT`、`DELETE`、`INSERT`、任意で `FLASHBACK`）を順番に出力し、最後に警告などを記録するログ領域が続きます。`exec.bat` を使用しない場合は、出力をファイルにリダイレクトしてください。
