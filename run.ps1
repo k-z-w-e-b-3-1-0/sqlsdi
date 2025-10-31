@@ -1,7 +1,9 @@
 param (
     [string]$Column,
     [string]$Condition,
-    [string]$OracleDllPath = $null
+    [string]$ConnectionString = $null,
+    [string]$OracleDllPath = $null,
+    [string]$OutputDirectory = $null
 )
 
 # 任意のPL/SQLプロシージャ呼び出し
@@ -16,6 +18,20 @@ $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 Write-Host "Column    : $Column"
 Write-Host "Condition : $Condition"
 
+if (-not $ConnectionString) {
+    $ConnectionString = "User Id=USERID;Password=PASSWORD;Data Source=IPADDRESS:PORT/SID"
+}
+
+if (-not $OutputDirectory) {
+    $OutputDirectory = Join-Path $scriptRoot 'output'
+}
+
+if (-not (Test-Path -Path $OutputDirectory)) {
+    New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
+}
+
+Write-Host "OutputDir : $OutputDirectory"
+
 $timestamp = Get-Date -Format 'yyyyMMddHHmmss'
 $sanitizedCondition = Get-SafeFileName -Value $Condition
 if ([string]::IsNullOrWhiteSpace($sanitizedCondition)) {
@@ -23,15 +39,14 @@ if ([string]::IsNullOrWhiteSpace($sanitizedCondition)) {
 }
 
 $baseFileName = "query_{0}_{1}" -f $timestamp, $sanitizedCondition
-$outputDirectory = Join-Path $scriptRoot 'output'
-$outputFile = Join-Path $outputDirectory ("$baseFileName.sql")
+$outputFile = Join-Path $OutputDirectory ("$baseFileName.sql")
 
 if (-not $OracleDllPath -and $env:ORACLE_DLL_PATH) {
     $OracleDllPath = $env:ORACLE_DLL_PATH
 }
 
 $exportParams = @{
-    ConnectionString     = "User Id=USERID;Password=PASSWORD;Data Source=IPADDRESS:PORT/SID"
+    ConnectionString     = $ConnectionString
     Schema               = "SCHEMA"
     TargetColumn         = $Column
     ConditionSql         = $Condition
@@ -48,9 +63,9 @@ if ($OracleDllPath) {
 Export-TableSqlWithData @exportParams
 
 $outputFiles = @()
-if (Test-Path -Path $outputDirectory) {
+if (Test-Path -Path $OutputDirectory) {
     $filter = "$baseFileName*.sql"
-    $outputFiles = Get-ChildItem -Path $outputDirectory -Filter $filter | Select-Object -ExpandProperty FullName
+    $outputFiles = Get-ChildItem -Path $OutputDirectory -Filter $filter | Select-Object -ExpandProperty FullName
 }
 
 foreach ($file in $outputFiles) {
