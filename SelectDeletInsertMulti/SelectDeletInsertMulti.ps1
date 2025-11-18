@@ -1,3 +1,50 @@
+if (-not (Get-Command Get-SafeFileName -ErrorAction SilentlyContinue)) {
+    function Get-SafeFileName {
+        param(
+            [string]$Value
+        )
+
+        if ([string]::IsNullOrWhiteSpace($Value)) {
+            return ""
+        }
+
+        $safe = $Value -replace '\s+', '_'
+        $safe = $safe -replace '[^0-9A-Za-z_\-]', '_'
+        $safe = [System.Text.RegularExpressions.Regex]::Replace($safe, '_{2,}', '_')
+        $safe = $safe.Trim('_')
+
+        if ($safe.Length -gt 80) {
+            $safe = $safe.Substring(0, 80)
+        }
+
+        return $safe
+    }
+}
+
+function Resolve-SqlDirectory {
+    param(
+        [string]$StartDirectory
+    )
+
+    $checkedDirectories = @()
+    $current = $StartDirectory
+
+    while ($current -and ($checkedDirectories -notcontains $current)) {
+        $checkedDirectories += $current
+        $sqlCandidate = Join-Path $current 'sql'
+        if (Test-Path -Path $sqlCandidate) {
+            return $sqlCandidate
+        }
+
+        $current = Split-Path -Parent $current
+        if (-not $current) {
+            break
+        }
+    }
+
+    throw "SQL directory not found relative to '$StartDirectory'."
+}
+
 function ConvertToSqlLiteral {
     param(
         [Parameter(Mandatory = $true)]
@@ -129,7 +176,8 @@ function Export-TableSqlWithDataMultiColumn {
         $scriptDirectory = Get-Location
     }
 
-    $defaultPrimaryKeySql = Join-Path $scriptDirectory "sql/primary_keys.sql"
+    $sqlDirectory = Resolve-SqlDirectory -StartDirectory $scriptDirectory
+    $defaultPrimaryKeySql = Join-Path $sqlDirectory "primary_keys.sql"
     $primaryKeysSqlPath = if ($PrimaryKeysSqlPath) { $PrimaryKeysSqlPath } else { $defaultPrimaryKeySql }
 
     if (-not (Test-Path -Path $primaryKeysSqlPath)) {

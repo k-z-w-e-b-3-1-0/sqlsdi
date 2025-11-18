@@ -1,25 +1,53 @@
-function Get-SafeFileName {
-    param(
-        [string]$Value
-    )
+#requires -Version 3.0
 
-    if ([string]::IsNullOrWhiteSpace($Value)) {
-        return ""
+if (-not (Get-Command Get-SafeFileName -ErrorAction SilentlyContinue)) {
+    function Get-SafeFileName {
+        param(
+            [string]$Value
+        )
+
+        if ([string]::IsNullOrWhiteSpace($Value)) {
+            return ""
+        }
+
+        $safe = $Value -replace '\s+', '_'
+        $safe = $safe -replace '[^0-9A-Za-z_\-]', '_'
+        $safe = [System.Text.RegularExpressions.Regex]::Replace($safe, '_{2,}', '_')
+        $safe = $safe.Trim('_')
+
+        if ($safe.Length -gt 80) {
+            $safe = $safe.Substring(0, 80)
+        }
+
+        return $safe
     }
-
-    $safe = $Value -replace '\s+', '_'
-    $safe = $safe -replace '[^0-9A-Za-z_\-]', '_'
-    $safe = [System.Text.RegularExpressions.Regex]::Replace($safe, '_{2,}', '_')
-    $safe = $safe.Trim('_')
-
-    if ($safe.Length -gt 80) {
-        $safe = $safe.Substring(0, 80)
-    }
-
-    return $safe
 }
 
-function Export-TableSqlWithData {
+function Resolve-SqlDirectory {
+    param(
+        [string]$StartDirectory
+    )
+
+    $checkedDirectories = @()
+    $current = $StartDirectory
+
+    while ($current -and ($checkedDirectories -notcontains $current)) {
+        $checkedDirectories += $current
+        $sqlCandidate = Join-Path $current 'sql'
+        if (Test-Path -Path $sqlCandidate) {
+            return $sqlCandidate
+        }
+
+        $current = Split-Path -Parent $current
+        if (-not $current) {
+            break
+        }
+    }
+
+    throw "SQL directory not found relative to '$StartDirectory'."
+}
+
+function Export-TableSqlWithIncrementedData {
     param(
         [string]$ConnectionString,
         [string]$Schema,
@@ -31,7 +59,10 @@ function Export-TableSqlWithData {
         [string]$PrimaryKeysSqlPath = $null,
         [string]$ColumnDefinitionsSqlPath = $null,
         [string]$OutputFile = $null,
-        [switch]$SplitByOperation
+        [switch]$SplitByOperation,
+        [string[]]$IncrementColumns = @(),
+        [double]$IncrementValue = 1,
+        [hashtable]$IncrementOverrides = @{}
     )
 
     if ($OracleDllPath) {
@@ -52,8 +83,9 @@ function Export-TableSqlWithData {
         $scriptDirectory = Get-Location
     }
 
-    $defaultPrimaryKeySql = Join-Path $scriptDirectory "sql/primary_keys.sql"
-    $defaultColumnDefinitionsSql = Join-Path $scriptDirectory "sql/column_definitions.sql"
+    $sqlDirectory = Resolve-SqlDirectory -StartDirectory $scriptDirectory
+    $defaultPrimaryKeySql = Join-Path $sqlDirectory "primary_keys.sql"
+    $defaultColumnDefinitionsSql = Join-Path $sqlDirectory "column_definitions.sql"
 
     $primaryKeySqlPath = if ($PrimaryKeysSqlPath) { $PrimaryKeysSqlPath } else { $defaultPrimaryKeySql }
     $columnDefinitionsSqlPath = if ($ColumnDefinitionsSqlPath) { $ColumnDefinitionsSqlPath } else { $defaultColumnDefinitionsSql }
@@ -79,8 +111,26 @@ function Export-TableSqlWithData {
     $flashbackLines  = @()
     $logLines        = @()
 
+    $invariantCulture = [System.Globalization.CultureInfo]::InvariantCulture
+
+    $incrementMap = @{}
+    foreach ($col in $IncrementColumns) {
+        if ([string]::IsNullOrWhiteSpace($col)) { continue }
+        $incrementMap[$col.ToUpperInvariant()] = $IncrementValue
+    }
+    foreach ($key in $IncrementOverrides.Keys) {
+        if ([string]::IsNullOrWhiteSpace($key)) { continue }
+        $value = $IncrementOverrides[$key]
+        try {
+            $converted = [System.Convert]::ToDouble($value, $invariantCulture)
+        } catch {
+            $logLines += "-- Increment override for column '$key' ignored: $($_.Exception.Message)"
+            continue
+        }
+        $incrementMap[$key.ToUpperInvariant()] = $converted
+    }
+
     try {
-        # 任意の PL/SQL 実行
         if ($PreSql) {
             $cmd = $conn.CreateCommand()
             $cmd.CommandText = $PreSql
@@ -95,7 +145,6 @@ function Export-TableSqlWithData {
             }
         }
 
-        # 主キー列取得
         $primaryKeys = @{}
         $cmd = $conn.CreateCommand()
         $cmd.CommandText = $primaryKeysSql
@@ -120,7 +169,6 @@ function Export-TableSqlWithData {
             $reader.Close()
         }
 
-        # 列定義取得
         $cmd = $conn.CreateCommand()
         $cmd.CommandText = $columnDefinitionsSql
         $cmd.CommandType = [System.Data.CommandType]::Text
@@ -150,13 +198,13 @@ function Export-TableSqlWithData {
             $reader.Close()
         }
 
-        # テーブルごとにデータ抽出
         $counter = 1
         foreach ($key in $tables.Keys  | Sort-Object) {
             $meta = $tables[$key]
             $colNames = $meta | ForEach-Object { $_[0] }
             $flatCols = $colNames
             $flatComments = $meta | ForEach-Object { $_[1] }
+            $flatTypes = $meta | ForEach-Object { $_[2] }
             $whereClause = "$TargetColumn $ConditionSql"
             $orderClause = ""
             if ($primaryKeys.ContainsKey($key) -and $primaryKeys[$key].Count -gt 0) {
@@ -182,13 +230,43 @@ function Export-TableSqlWithData {
                     while ($reader.Read()) {
                         $vals = @()
                         for ($i = 0; $i -lt $reader.FieldCount; $i++) {
+                            $columnName = $flatCols[$i]
+                            $typeInfo = $flatTypes[$i]
                             $v = $reader.GetValue($i)
-                            $t = $meta[$i][2]
+
+                            $columnKey = $columnName.ToUpperInvariant()
+                            $shouldIncrement = $incrementMap.ContainsKey($columnKey)
+                            $incrementAmount = if ($shouldIncrement) { $incrementMap[$columnKey] } else { $null }
+
                             if ($v -eq $null -or $reader.IsDBNull($i)) {
+                                if ($shouldIncrement) {
+                                    $logLines += "-- Increment skipped for $key.$columnName: value is NULL"
+                                }
                                 $vals += "NULL"
-                            } elseif ($t -like "*CHAR*" -or $t -like "*CLOB*") {
+                                continue
+                            }
+
+                            if ($shouldIncrement) {
+                                if ($typeInfo -notmatch 'NUMBER|FLOAT|DECIMAL|INT|BINARY_DOUBLE|BINARY_FLOAT') {
+                                    $logLines += "-- Increment skipped for $key.$columnName: data type '$typeInfo' is not numeric"
+                                    $incrementAmount = $null
+                                }
+                            }
+
+                            if ($shouldIncrement -and $incrementAmount -ne $null) {
+                                try {
+                                    $baseValue = [System.Convert]::ToDouble($v, $invariantCulture)
+                                    $newValue = $baseValue + [System.Convert]::ToDouble($incrementAmount, $invariantCulture)
+                                    $vals += $newValue.ToString('G', $invariantCulture)
+                                    continue
+                                } catch {
+                                    $logLines += "-- Increment failed for $key.$columnName: $($_.Exception.Message)"
+                                }
+                            }
+
+                            if ($typeInfo -like "*CHAR*" -or $typeInfo -like "*CLOB*") {
                                 $vals += "'" + $v.ToString().Replace("'", "''") + "'"
-                            } elseif ($t -like "*DATE*" -or $t -like "*TIMESTAMP*") {
+                            } elseif ($typeInfo -like "*DATE*" -or $typeInfo -like "*TIMESTAMP*") {
                                 try {
                                     $dt = $reader.GetDateTime($i)
                                     $vals += "TO_DATE('" + $dt.ToString("yyyy-MM-dd HH:mm:ss") + "','YYYY-MM-DD HH24:MI:SS')"

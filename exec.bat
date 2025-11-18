@@ -8,6 +8,6 @@ echo %NOW%
 REM Optionally set ORACLE_DLL_PATH before invoking PowerShell, for example:
 REM set ORACLE_DLL_PATH=C:\path\to\Oracle.DataAccess.dll
 
-C:\Windows\SysWOW64\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -File run.ps1 "column_name" " condition"
+C:\Windows\SysWOW64\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\SelectDeletInsert\run.ps1 "column_name" "condition"
 
 pause
