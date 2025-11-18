@@ -12,7 +12,6 @@ param (
 )
 
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
-. "$scriptRoot\SelectDeletInsert.ps1"
 . "$scriptRoot\SelectDeletInsertMulti.ps1"
 
 Write-Host "called (multi-column)."
@@ -46,6 +45,10 @@ if ([string]::IsNullOrWhiteSpace($sanitizedCondition)) {
 $baseFileName = "query_{0}_{1}" -f $timestamp, $sanitizedCondition
 $outputDirectory = Join-Path $scriptRoot 'output'
 $outputFile = Join-Path $outputDirectory ("$baseFileName.sql")
+
+if (-not (Test-Path -Path $outputDirectory)) {
+    New-Item -ItemType Directory -Path $outputDirectory -Force | Out-Null
+}
 
 if (-not $OracleDllPath -and $env:ORACLE_DLL_PATH) {
     $OracleDllPath = $env:ORACLE_DLL_PATH
