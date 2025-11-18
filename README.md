@@ -57,6 +57,25 @@ Export-TableSqlWithDataMultiColumn -ConnectionString "User Id=..." -Schema "SCHE
 Export-TableSqlWithData ... | Out-File query.sql -Encoding UTF8
 ```
 
+### インクリメント付きエクスポート スクリプトの実行例
+
+列値に加算処理を適用したい場合は `SelectDeletInsertIncrement/SelectDeletInsertIncrement.ps1` を読み込み、`Export-TableSqlWithIncrementedData` を呼び出します。`-IncrementColumns` で対象列を指定し、`-IncrementValue` で一括加算値を、列ごとに異なる加算値を指定したい場合は `-IncrementOverrides` にハッシュテーブルを渡します。
+
+```powershell
+. .\SelectDeletInsertIncrement\SelectDeletInsertIncrement.ps1
+Export-TableSqlWithIncrementedData \ 
+  -ConnectionString "User Id=..." \ 
+  -Schema "SCHEMA" \ 
+  -TargetColumn "COL_A" \ 
+  -ConditionSql "BETWEEN '2024-01-01' AND '2024-01-31'" \ 
+  -IncrementColumns @('AMOUNT', 'TAX') \ 
+  -IncrementValue 1.5 \ 
+  -IncrementOverrides @{ 'TAX' = 0.8 } \ 
+  -OutputFile ".\\output\\query_increment.sql"
+```
+
+上記の例では `AMOUNT` 列には 1.5、`TAX` 列には 0.8 が加算された状態で `SELECT`、`DELETE`、`INSERT` の各セクションが出力されます。
+
 ## Excel からの実行例 (VBA モジュール)
 
 Excel の一覧から `SelectDeletInsert/run.ps1` を順番に起動したい場合は、リポジトリの `excel/RunPowerShell.bas` モジュールをインポートしてください。
