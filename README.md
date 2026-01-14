@@ -13,12 +13,14 @@ Oracle のテーブルデータを後から再実行できる SQL スクリプ�
 | `SelectDeletInsertMulti/SelectDeletInsertMulti.ps1` | 複数列を対象にした条件組み立てとエクスポートを行う `Export-TableSqlWithDataMultiColumn`。 |
 | `SelectDeletInsertMulti/run.ps1` | 列配列や列ごとの条件マップを受け取り、マルチカラム抽出を実行するエントリーポイント。 |
 | `exec.bat` | `SelectDeletInsert\run.ps1` をダブルクリックで実行し、標準出力を `query<timestamp>.sql` にリダイレクトする Windows 用ラッパー。 |
+| `SqlSdiCli/` | .NET 6/7 で動作する CLI 版（自己完結した単一ファイル配布に対応）。 |
 
 ## 必要要件
 
 * PowerShell を備えた Windows 環境（スクリプトでは `C:\\Windows\\SysWOW64\\WindowsPowerShell\\v1.0` 配下の `powershell.exe` を想定）。
 * Oracle Data Provider for .NET (`Oracle.DataAccess.dll`)。アセンブリがグローバル アセンブリ キャッシュに存在しない場合は、`ORACLE_DLL_PATH` 環境変数を設定するか、各 `run.ps1`（例: `SelectDeletInsert/run.ps1`）実行時に `-OracleDllPath` パラメーターを指定します。
 * 指定した接続文字列で対象の Oracle データベースに接続できるネットワーク環境。
+* CLI 版を使う場合は .NET 6/7 SDK（ビルド時）と `Oracle.ManagedDataAccess` パッケージを利用します。
 
 ## 使い方
 
@@ -55,6 +57,47 @@ Export-TableSqlWithDataMultiColumn -ConnectionString "User Id=..." -Schema "SCHE
 
 ```powershell
 Export-TableSqlWithData ... | Out-File query.sql -Encoding UTF8
+```
+
+## .NET 6/7 CLI 版 (インストール不要配布)
+
+PowerShell を使わずに実行したい場合は `SqlSdiCli` を利用できます。自己完結の単一ファイルで再配布できます。
+
+### ビルド & 再配布 (単一ファイル)
+
+```bash
+# Windows (x64) 向けに自己完結で発行
+dotnet publish SqlSdiCli -c Release -r win-x64 --self-contained true /p:PublishSingleFile=true
+```
+
+上記で生成された `SqlSdiCli\\bin\\Release\\net7.0\\win-x64\\publish\\SqlSdiCli.exe` を配布すれば、.NET のインストールなしで実行できます。Linux/macOS も `-r linux-x64` / `-r osx-x64` で同様に発行可能です。
+
+### 実行例
+
+```bash
+SqlSdiCli.exe \\
+  --connection-string \"User Id=...;Password=...;Data Source=...\" \\
+  --schema SCHEMA \\
+  --target-column column_name \\
+  --condition \"= 'value'\" \\
+  --flashback-timestamp \"2025-08-17 19:00:00\" \\
+  --output-file \".\\output\\query.sql\" \\
+  --split-by-operation
+```
+
+`--sql-dir` を指定すると `sql/primary_keys.sql` と `sql/column_definitions.sql` の参照先を切り替えられます。未指定の場合は実行ファイルのディレクトリから親方向に探索します。
+
+### Codex cloud でのビルド/配布手順まとめ
+
+```bash
+# 1) SDK 確認
+dotnet --info
+
+# 2) ビルド
+dotnet build SqlSdiCli -c Release
+
+# 3) 単一ファイルで自己完結の発行
+dotnet publish SqlSdiCli -c Release -r win-x64 --self-contained true /p:PublishSingleFile=true
 ```
 
 ### インクリメント付きエクスポート スクリプトの実行例
